@@ -63,6 +63,7 @@ const E=[
   {n:'DeepSeek',c:'#1a9fff',a:'Thinking… 47 секунд',h:'Вывод: ой'}
 ];
 const V=['Не сегодня!','Бдыщ!','Я таксист, мне некогда!','AVAX в лонг, ИИ в полёт!','Тапок решает!','Опа, мимо кассы!'];
+const MMM=['ммм~','ох, хорошо...','ещё чуть-чуть...','спинка довольна','ой, приятно~'];
 const cv=document.getElementById('c'), ctx=cv.getContext('2d');
 const $ = id => document.getElementById(id);
 const tg = window.Telegram && Telegram.WebApp;
@@ -72,7 +73,8 @@ window.addEventListener('unhandledrejection', ev => jsErrors.push(String(ev.reas
 
 let W=390,H=844,dpr=1, score=0, best=0, lives=3, level=1, combo=0, comboT=0;
 let running=false, over=false, muted=false, last=0, spawn=0, sayT=0;
-let enemies=[], parts=[], floats=[], vasya={x:195,y:700,swing:0,face:0,bob:0,hit:0};
+let enemies=[], parts=[], floats=[], puffs=[], relax=0, purrT=0, blissSay=0, relaxKO=false;
+let vasya={x:195,y:700,swing:0,face:0,bob:0,hit:0,bliss:0,startle:0};
 let ac=null;
 
 try{ muted=localStorage.getItem('vasyaMute')==='1'; best=+localStorage.getItem('vasyaBest')||0; }catch(e){}
@@ -125,6 +127,11 @@ function snd(kind){
   else if(kind==='boing'){ tone(200,.28,'sine',.16,520); hap('hurt'); }
   else if(kind==='laugh'){ [520,620,720,640].forEach((f,i)=>setTimeout(()=>tone(f,.07,'triangle',.12),i*70)); hap('ok'); }
   else if(kind==='wah'){ [400,340,280,220,180,140].forEach((f,i)=>setTimeout(()=>tone(f,.18,'sawtooth',.1,f*.7),i*160)); hap('hurt'); }
+  else if(kind==='purr'){
+    [160,190,150,180,140].forEach((f,i)=>setTimeout(()=>tone(f,.22,'sine',.07,f+30),i*120));
+    setTimeout(()=>tone(90,.4,'triangle',.05,130),200);
+    hap('ok');
+  }
 }
 function say(t){ $('say').textContent=t; $('say').classList.add('on'); clearTimeout(sayT); sayT=setTimeout(()=>$('say').classList.remove('on'),1400); }
 function hearts(){ $('hp').textContent='❤️'.repeat(Math.max(0,lives))+'🤍'.repeat(Math.max(0,3-lives)); }
@@ -156,10 +163,28 @@ function spawnEnemy(){
   else { x=W+50; y=40+Math.random()*(H*0.45); }
   const dx=vasya.x-x, dy=vasya.y-40-y, len=Math.hypot(dx,dy)||1;
   vx=dx/len*spd; vy=dy/len*spd;
-  enemies.push({k,x,y,vx,vy,r:36,rot:0,dead:false,hitT:0,s:1});
+  enemies.push({k,x,y,vx,vy,r:36,rot:0,dead:false,hitT:0,s:1,phase:'',sneak:0,rub:0,side:1,ox:x,oy:y});
   snd('robot');
 }
 
+function massaging(){ return enemies.some(e=>!e.dead && (e.phase==='rub'||e.phase==='sneak')); }
+function rubbing(){ return enemies.some(e=>!e.dead && e.phase==='rub'); }
+function startMassage(en){
+  if(!en||en.dead||en.phase) return;
+  en.phase='sneak'; en.sneak=0; en.rub=0;
+  en.side = (en.x < vasya.x) ? -1 : 1;
+  en.ox=en.x; en.oy=en.y;
+  snd('purr'); purrT=performance.now();
+  say(en.k.n+' подкрался сзади…  — Вася: «ммм~»');
+}
+function spawnPuff(){
+  const kind=Math.random()<.65?'heart':'steam';
+  puffs.push({
+    x:vasya.x+(Math.random()*50-25),
+    y:vasya.y-50-Math.random()*20,
+    t:0, kind, s:.7+Math.random()*.5
+  });
+}
 function burst(x,y,col){
   for(let i=0;i<12;i++){
     const a=Math.random()*Math.PI*2, sp=80+Math.random()*160;
@@ -181,15 +206,23 @@ function swat(en){
   snd('bonk');
   if(combo>=3){ $('combo').textContent='КОМБО x'+combo+'!'; $('combo').classList.add('show'); snd('laugh'); }
   else $('combo').classList.remove('show');
-  say(en.k.h+'  — Вася: «'+V[score%V.length]+'»');
+  const wasRub=!!en.phase;
+  en.phase='';
+  if(wasRub){
+    vasya.bliss=0; vasya.startle=.55;
+    say('А?! Ты чё!  — Вася отпрыгнул, тапок наготове.');
+  } else {
+    say(en.k.h+'  — Вася: «'+V[score%V.length]+'»');
+  }
 }
 function smashNearest(){
   if(!running) return;
-  let t=null, bestD=1e9;
+  let t=null, bestD=1e9, bestPri=0;
   for(const en of enemies){
     if(en.dead) continue;
+    const pri=en.phase?2:1;
     const d=Math.hypot(en.x-vasya.x, en.y-vasya.y);
-    if(d<bestD){ bestD=d; t=en; }
+    if(pri>bestPri || (pri===bestPri && d<bestD)){ bestD=d; bestPri=pri; t=en; }
   }
   if(t) swat(t);
   else { vasya.swing=.6; snd('boing'); say('Эй, ещё летят! Вася разогрел тапок.'); }
@@ -202,18 +235,21 @@ function hurt(en){
 }
 function gameOver(){
   running=false; over=true; saveBest(); snd('wah');
-  $('res').textContent='Очки: '+score+'  •  Рекорд: '+best+'\nВася ушёл на линию, ИИ подождут.';
+  $('res').textContent='Очки: '+score+'  •  Рекорд: '+best+'\n'+(relaxKO?'Вася расслабился и уснул на линии.':'Вася ушёл на линию, ИИ подождут.');
   $('over').classList.remove('hid');
 }
 function start(){
   $('menu').classList.add('hid'); $('over').classList.add('hid');
-  enemies=[]; parts=[]; floats=[]; score=0; lives=3; level=1; combo=0; over=false; running=true;
+  enemies=[]; parts=[]; floats=[]; puffs=[]; score=0; lives=3; level=1; combo=0; over=false; running=true;
+  relax=0; relaxKO=false; purrT=0; blissSay=0; vasya.bliss=0; vasya.startle=0; vasya.swing=0;
   ui(); audio(); snd('robot'); last=performance.now(); spawn=0;
   loop(last);
 }
 function hitTest(x,y){
+  const nearVasya=Math.hypot(x-vasya.x,y-vasya.y)<70;
   for(let i=enemies.length-1;i>=0;i--){
     const en=enemies[i]; if(en.dead) continue;
+    if(en.phase && nearVasya) return en;
     if(Math.hypot(en.x-x,en.y-y)<en.r+14) return en;
   }
   return null;
@@ -227,6 +263,7 @@ function loop(now){
   const alive=enemies.filter(e=>!e.dead).length;
   if(spawn>gap && alive<3+Math.min(3,level)){ spawn=0; spawnEnemy(); }
   vasya.bob+=dt; if(vasya.swing>0) vasya.swing=Math.max(0,vasya.swing-dt*4); if(vasya.hit>0) vasya.hit=Math.max(0,vasya.hit-dt);
+  if(vasya.startle>0) vasya.startle=Math.max(0,vasya.startle-dt);
   if(now-comboT>1200) $('combo').classList.remove('show');
   const floor=vasya.y-20;
   for(const en of enemies){
@@ -234,14 +271,47 @@ function loop(now){
       en.hitT-=dt*2; en.x+=en.vx*dt*1.4; en.y-=180*dt; en.rot+=720*dt; en.s=Math.max(.1,en.s-dt*1.6);
       continue;
     }
-    en.x+=en.vx*dt; en.y+=en.vy*dt; en.rot=Math.sin(now/200+en.x)*8;
-    if(en.y>floor) hurt(en);
+    if(en.phase==='sneak'){
+      en.sneak=Math.min(1, en.sneak+dt*1.8);
+      const u=en.sneak, tx=vasya.x+en.side*22, ty=vasya.y+4;
+      const cx=(en.ox+tx)/2 + en.side*80, cy=(en.oy+ty)/2 - 20;
+      const iu=1-u;
+      en.x=iu*iu*en.ox + 2*iu*u*cx + u*u*tx;
+      en.y=iu*iu*en.oy + 2*iu*u*cy + u*u*ty;
+      en.rot=Math.sin(u*12)*10;
+      if(u>=1){ en.phase='rub'; en.rub=0; say('Вася: «'+MMM[Math.floor(Math.random()*MMM.length)]+'»'); }
+    } else if(en.phase==='rub'){
+      en.rub+=dt;
+      en.x=vasya.x+en.side*22 + Math.sin(en.rub*10)*2;
+      en.y=vasya.y+4 + Math.sin(en.rub*8)*2;
+      en.rot=Math.sin(en.rub*12)*8;
+    } else {
+      en.x+=en.vx*dt; en.y+=en.vy*dt; en.rot=Math.sin(now/200+en.x)*8;
+      const d=Math.hypot(en.x-vasya.x, en.y-(vasya.y-10));
+      if(en.y>floor || d<62) startMassage(en);
+    }
+  }
+  vasya.bliss = rubbing() ? 1 : 0;
+  if(rubbing()){
+    relax=Math.min(1, relax+dt/2.6);
+    if(now-purrT>800){ snd('purr'); purrT=now; }
+    if(now-blissSay>1800){ blissSay=now; say('Вася: «'+MMM[Math.floor(Math.random()*MMM.length)]+'»'); }
+    if(Math.random()<dt*5) spawnPuff();
+    if(relax>=1){
+      relax=0; lives--; ui(); hap('hurt');
+      if(lives<=0){ relaxKO=true; gameOver(); }
+      else say('Вася совсем расслабился… ещё чуть-чуть — и уснёт!');
+    }
+  } else {
+    relax=Math.max(0, relax-dt*0.18);
   }
   enemies=enemies.filter(e=>!e.dead || e.hitT>0);
   for(const p of parts){ p.life-=dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=240*dt; }
   parts=parts.filter(p=>p.life>0);
   for(const f of floats){ f.t+=dt; f.y+=f.vy*dt; }
   floats=floats.filter(f=>f.t<.7);
+  for(const u of puffs){ u.t+=dt; u.y-=40*dt; u.x+=Math.sin(u.t*6)*12*dt; }
+  puffs=puffs.filter(u=>u.t<1.2);
   draw();
   requestAnimationFrame(loop);
 }
@@ -257,14 +327,23 @@ function draw(){
   // clouds
   const t=performance.now()/1000;
   cloud(60+Math.sin(t*.4)*20, 70); cloud(W*0.55+Math.cos(t*.3)*16, 100);
-  for(const en of enemies) drawEnemy(en);
+  for(const en of enemies){ if(en.phase) drawEnemy(en); }
+  drawVasya();
+  for(const en of enemies){ if(en.phase==='rub') drawRubHands(en); }
+  for(const en of enemies){
+    if(!en.phase) continue;
+    ctx.save(); ctx.translate(en.x,en.y); ctx.rotate(en.rot*Math.PI/180); ctx.scale(en.s,en.s);
+    drawEnemyLabel(en); ctx.restore();
+  }
+  for(const en of enemies){ if(!en.phase) drawEnemy(en); }
   for(const p of parts){ ctx.globalAlpha=Math.max(0,p.life/.45); ctx.fillStyle=p.c; ctx.beginPath(); ctx.arc(p.x,p.y,4,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1; }
   for(const f of floats){
     ctx.save(); ctx.globalAlpha=1-f.t/.7; ctx.translate(f.x,f.y); ctx.rotate(-.1);
     ctx.font='900 28px ui-rounded,system-ui,sans-serif'; ctx.fillStyle='#ff2d55'; ctx.strokeStyle='#1a1a2e'; ctx.lineWidth=5;
     ctx.strokeText(f.txt,-40,0); ctx.fillText(f.txt,-40,0); ctx.restore();
   }
-  drawVasya();
+  for(const u of puffs) drawPuff(u);
+  drawRelaxMeter();
 }
 function cloud(x,y){
   ctx.fillStyle='#fff'; ctx.strokeStyle='#1a1a2e'; ctx.lineWidth=3;
@@ -281,13 +360,65 @@ function drawEnemy(en){
   ctx.fillStyle='#fff'; roundRect(-16,-8,12,16,5); ctx.fill(); ctx.stroke();
   roundRect(4,-8,12,16,5); ctx.fill(); ctx.stroke();
   ctx.fillStyle='#1a1a2e'; ctx.beginPath(); ctx.arc(-10,0,3,0,Math.PI*2); ctx.arc(10,0,3,0,Math.PI*2); ctx.fill();
+  if(!en.phase) drawEnemyLabel(en);
+  ctx.restore();
+}
+function drawEnemyLabel(en){
   ctx.fillStyle='#fff'; ctx.strokeStyle='#1a1a2e'; ctx.lineWidth=2;
-  const tw=ctx.measureText? (ctx.font='800 11px system-ui', ctx.measureText(en.k.n).width):40;
   ctx.font='800 11px system-ui,sans-serif';
+  const tw=ctx.measureText(en.k.n).width;
   const bw=Math.max(40, tw+12);
-  roundRect(-bw/2,30,bw,16,7); ctx.fill(); ctx.stroke();
+  const lx=en.phase? (en.side||1)*36 : 0;
+  const ly=en.phase? 8 : 38;
+  roundRect(-bw/2+lx,ly-8,bw,16,7); ctx.fill(); ctx.stroke();
   ctx.fillStyle='#1a1a2e'; ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillText(en.k.n,0,38);
+  ctx.fillText(en.k.n,lx,ly);
+}
+function drawPuff(u){
+  ctx.save(); ctx.globalAlpha=Math.max(0,1-u.t/1.2); ctx.translate(u.x,u.y);
+  if(u.kind==='heart'){
+    ctx.fillStyle='#ff4d6d'; ctx.strokeStyle='#1a1a2e'; ctx.lineWidth=2;
+    const s=7*u.s;
+    ctx.beginPath(); ctx.moveTo(0,s);
+    ctx.bezierCurveTo(-s*1.3,s*.2,-s*.9,-s*.7,0,-s*.15);
+    ctx.bezierCurveTo(s*.9,-s*.7,s*1.3,s*.2,0,s);
+    ctx.fill(); ctx.stroke();
+  } else {
+    ctx.fillStyle='#fff'; ctx.strokeStyle='#1a1a2e'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.ellipse(0,0,8*u.s,5*u.s,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(6*u.s,-4*u.s,5*u.s,3.5*u.s,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawRubHands(en){
+  const t=en.rub||0;
+  const x=vasya.x, y=vasya.y + Math.sin(vasya.bob*6)*3;
+  const L=[-20, -8+Math.sin(t*14)*5], R=[20, -6+Math.cos(t*16)*5];
+  for(const [hx,hy] of [L,R]){
+    ctx.save(); ctx.translate(x+hx,y+hy); ctx.rotate(Math.sin(t*14+hx)*.25);
+    ctx.fillStyle=en.k.c; ctx.strokeStyle='#1a1a2e'; ctx.lineWidth=2.5;
+    ctx.beginPath(); ctx.ellipse(0,0,11,8,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#ffd7a8';
+    ctx.beginPath(); ctx.ellipse(-5,6,4,5,.2,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(5,6,4,5,-.2,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+}
+function drawRelaxMeter(){
+  if(relax<=0.01 && !rubbing()) return;
+  const x=vasya.x, y=vasya.y-86;
+  const w=120,h=16;
+  ctx.save(); ctx.translate(x-w/2,y);
+  ctx.fillStyle='#fff'; ctx.strokeStyle='#1a1a2e'; ctx.lineWidth=3;
+  roundRect(0,0,w,h,8); ctx.fill(); ctx.stroke();
+  ctx.save();
+  ctx.beginPath(); roundRect(2,2,w-4,h-4,6); ctx.clip();
+  ctx.fillStyle='#ff8ec8';
+  ctx.fillRect(2,2,Math.max(0,(w-4)*relax),h-4);
+  ctx.restore();
+  ctx.fillStyle='#1a1a2e'; ctx.font='800 10px ui-rounded,system-ui,sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('расслабился', w/2, h/2+0.5);
   ctx.restore();
 }
 function drawVasya(){
@@ -326,16 +457,33 @@ function drawVasya(){
   ctx.beginPath(); ctx.arc(28,-18,7,0,Math.PI*2); ctx.fill(); ctx.stroke();
   ctx.beginPath(); ctx.arc(0,-28,28,0,Math.PI*2); ctx.fill(); ctx.stroke();
   ctx.strokeStyle='#3a2a1a'; ctx.lineWidth=5; ctx.beginPath(); ctx.arc(0,-40,16,Math.PI*1.15,Math.PI*1.85); ctx.stroke();
-  ctx.fillStyle='#ff8a7a'; ctx.globalAlpha=.6; ctx.beginPath(); ctx.ellipse(-18,-16,6,3,0,0,Math.PI*2); ctx.ellipse(18,-16,6,3,0,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1;
-  ctx.fillStyle='#fff'; ctx.strokeStyle='#1a1a2e'; ctx.lineWidth=2.5;
-  ctx.beginPath(); ctx.ellipse(-10,-30,10,12,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
-  ctx.beginPath(); ctx.ellipse(10,-30,10,12,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
-  const look = Math.max(-4, Math.min(4, (vasya.face-x)/30));
-  ctx.fillStyle='#1a1a2e'; ctx.beginPath(); ctx.arc(-8+look,-28,5,0,Math.PI*2); ctx.arc(12+look,-28,5,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-10,-31,2,0,Math.PI*2); ctx.arc(10,-31,2,0,Math.PI*2); ctx.fill();
-  ctx.strokeStyle='#c45c3a'; ctx.lineWidth=3; ctx.lineCap='round';
-  if(swing>0){ ctx.fillStyle='#c45c3a'; ctx.beginPath(); ctx.ellipse(0,-12,10,8,0,0,Math.PI*2); ctx.fill(); }
-  else { ctx.beginPath(); ctx.arc(0,-18,10,0.25,Math.PI-0.25); ctx.stroke(); }
+  const blush=vasya.bliss?1:0.6;
+  ctx.fillStyle='#ff8a7a'; ctx.globalAlpha=blush; ctx.beginPath(); ctx.ellipse(-18,-16,vasya.bliss?8:6,vasya.bliss?5:3,0,0,Math.PI*2); ctx.ellipse(18,-16,vasya.bliss?8:6,vasya.bliss?5:3,0,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1;
+  ctx.lineCap='round';
+  if(vasya.bliss && !vasya.startle && swing<=0){
+    ctx.strokeStyle='#1a1a2e'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(-10,-28,6,0.2,Math.PI-0.2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(10,-28,6,0.2,Math.PI-0.2); ctx.stroke();
+    ctx.strokeStyle='#c45c3a'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(0,-16,8,0.15,Math.PI-0.15); ctx.stroke();
+  } else if(vasya.startle){
+    ctx.fillStyle='#fff'; ctx.strokeStyle='#1a1a2e'; ctx.lineWidth=2.5;
+    ctx.beginPath(); ctx.ellipse(-10,-30,11,13,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(10,-30,11,13,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#1a1a2e'; ctx.beginPath(); ctx.arc(-10,-28,6,0,Math.PI*2); ctx.arc(10,-28,6,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-12,-31,2.2,0,Math.PI*2); ctx.arc(8,-31,2.2,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#c45c3a'; ctx.beginPath(); ctx.ellipse(0,-12,7,8,0,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='#1a1a2e'; ctx.lineWidth=2; ctx.stroke();
+  } else {
+    ctx.fillStyle='#fff'; ctx.strokeStyle='#1a1a2e'; ctx.lineWidth=2.5;
+    ctx.beginPath(); ctx.ellipse(-10,-30,10,12,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(10,-30,10,12,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    const look = Math.max(-4, Math.min(4, (vasya.face-x)/30));
+    ctx.fillStyle='#1a1a2e'; ctx.beginPath(); ctx.arc(-8+look,-28,5,0,Math.PI*2); ctx.arc(12+look,-28,5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-10,-31,2,0,Math.PI*2); ctx.arc(10,-31,2,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='#c45c3a'; ctx.lineWidth=3;
+    if(swing>0){ ctx.fillStyle='#c45c3a'; ctx.beginPath(); ctx.ellipse(0,-12,10,8,0,0,Math.PI*2); ctx.fill(); }
+    else { ctx.beginPath(); ctx.arc(0,-18,10,0.25,Math.PI-0.25); ctx.stroke(); }
+  }
   ctx.restore();
 }
 
@@ -376,16 +524,36 @@ if(shot==='1'){
   $('res').textContent='Очки: 27  •  Рекорд: '+best+'\nВася ушёл на линию, ИИ подождут.';
   $('over').classList.remove('hid');
   draw();
+}else if(shot==='3'){
+  $('menu').classList.add('hid'); running=true; over=false; score=9; lives=2; level=1; relax=.58; ui();
+  say('Вася: «ммм~  ох, хорошо...»');
+  enemies=[
+    {k:E[0],x:0,y:0,vx:0,vy:0,r:36,rot:4,dead:false,hitT:0,s:1,phase:'rub',sneak:1,rub:.8,side:-1,ox:0,oy:0},
+    {k:E[2],x:W*.72,y:210,vx:0,vy:20,r:36,rot:-6,dead:false,hitT:0,s:1,phase:'',sneak:0,rub:0,side:1,ox:0,oy:0}
+  ];
+  enemies[0].x=vasya.x-22; enemies[0].y=vasya.y+4;
+  for(let i=0;i<8;i++) spawnPuff();
+  muted=true; last=performance.now(); draw(); requestAnimationFrame(loop);
 }
 
 window.__vasya={
   get score(){return score}, get lives(){return lives}, get level(){return level},
   get running(){return running}, get over(){return over}, get errors(){return jsErrors.slice()},
-  start, smash:smashNearest, spawn:spawnEnemy,
+  get relax(){return relax}, get massaging(){return massaging()}, get rubbing(){return rubbing()},
+  start, smash:smashNearest, spawn:spawnEnemy, startMassage,
+  massageNow(){
+    if(!running) start();
+    let e=enemies.find(en=>!en.dead && !en.phase);
+    if(!e){ spawnEnemy(); e=enemies[enemies.length-1]; }
+    e.x=vasya.x-40; e.y=vasya.y-40; startMassage(e); e.phase='rub'; e.sneak=1; e.rub=.3;
+    e.x=vasya.x+e.side*22; e.y=vasya.y+4;
+    relax=Math.max(relax,.4);
+    say('Вася: «ммм~»');
+  },
   tap(x,y){ const en=hitTest(x,y); if(en){ swat(en); return true;} return false; },
   forceOver:gameOver,
-  enemyAt(i){ const e=enemies[i]; return e&&!e.dead? {x:e.x,y:e.y,n:e.k.n}:null; },
-  enemies(){ return enemies.filter(e=>!e.dead).map(e=>({x:e.x,y:e.y,n:e.k.n})); }
+  enemyAt(i){ const e=enemies[i]; return e&&!e.dead? {x:e.x,y:e.y,n:e.k.n,phase:e.phase||''}:null; },
+  enemies(){ return enemies.filter(e=>!e.dead).map(e=>({x:e.x,y:e.y,n:e.k.n,phase:e.phase||''})); }
 };
 })();
 </script>
