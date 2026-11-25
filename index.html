@@ -21,9 +21,9 @@ html,body{height:100%;background:#7ec8ff;font-family:ui-rounded,system-ui,sans-s
 .ov{position:absolute;inset:0;background:#7ec8ffee;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;color:#1a1a2e;pointer-events:auto}
 .ov.hid{display:none}
 .ov h1,.ov h2{font-size:30px;margin:8px 0;text-shadow:2px 2px 0 #fff}
-.ov p{font-weight:700;max-width:320px;margin:6px 0 16px;font-size:15px;line-height:1.35}
+.ov p{font-weight:700;max-width:320px;margin:6px 0 16px;font-size:15px;line-height:1.4;white-space:pre-line}
 .ov button{border:3px solid #1a1a2e;background:#ffd400;color:#1a1a2e;font-weight:900;font-size:18px;border-radius:16px;padding:12px 24px;cursor:pointer;box-shadow:0 4px 0 #1a1a2e;font-family:inherit}
-#say{position:absolute;left:10%;right:10%;bottom:86px;background:#fff;border:3px solid #1a1a2e;border-radius:16px;padding:8px 12px;font-weight:800;font-size:14px;color:#1a1a2e;text-align:center;opacity:0;pointer-events:none;box-shadow:0 3px 0 #1a1a2e}
+#say{position:absolute;left:8%;right:8%;top:96px;background:#fff;border:3px solid #1a1a2e;border-radius:16px;padding:8px 12px;font-weight:800;font-size:14px;color:#1a1a2e;text-align:center;opacity:0;pointer-events:none;box-shadow:0 3px 0 #1a1a2e}
 #say.on{opacity:1}
 </style>
 </head>
@@ -140,7 +140,7 @@ function resize(){
   cv.style.width=W+'px'; cv.style.height=H+'px';
   ctx.setTransform(dpr,0,0,dpr,0,0);
   vasya.x = W/2;
-  vasya.y = H - 130;
+  vasya.y = H - 160;
 }
 resize();
 window.addEventListener('resize', resize);
@@ -371,7 +371,7 @@ if(shot==='1'){
   vasya.swing=.5; vasya.face=W*.28; floats=[{x:W*.55,y:200,t:.1,txt:'БДЫЩ!',vy:0}];
   muted=true; last=performance.now(); draw(); requestAnimationFrame(loop);
 }else if(shot==='2'){
-  $('menu').classList.add('hid'); score=27; best=Math.max(best,27); lives=0; over=true; running=false; ui();
+  $('menu').classList.add('hid'); score=27; best=Math.max(best,27); lives=0; level=3; over=true; running=false; ui();
   saveBest();
   $('res').textContent='Очки: 27  •  Рекорд: '+best+'\nВася ушёл на линию, ИИ подождут.';
   $('over').classList.remove('hid');
